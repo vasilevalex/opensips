@@ -260,7 +260,7 @@ static inline int mi_add_aor_node(struct mi_node *parent, urecord_t* r,
 
 	if (mi_dump_kv_store) {
 		kv_buf = store_serialize(r->kv_storage);
-		if (!ZSTR(kv_buf) && !add_mi_node_child(anode, MI_DUP_VALUE,
+		if (!ZSTR(kv_buf) && !add_mi_attr(anode, MI_DUP_VALUE,
 		                          MI_SSTR("KV-Store"), kv_buf.s, kv_buf.len)) {
 			store_free_buffer(&kv_buf);
 			return -1;
