@@ -45,6 +45,7 @@ extern int      tls_default_method;
 extern int      tls_verify_client_cert;
 extern int      tls_verify_server_cert;
 extern int      tls_require_client_cert;
+extern int      tls_ca_client_send;
 extern int	crl_check_all;
 extern char    *tls_cert_file;
 extern char    *tls_pkey_file;
@@ -72,6 +73,7 @@ extern str     cadir_col;
 extern str     cplist_col;
 extern str     dhparams_col;
 extern str     eccurve_col;
+extern str     ca_client_send_col;
 
 extern int      tls_handshake_timeout;
 extern int      tls_send_timeout;

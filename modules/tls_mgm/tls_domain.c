@@ -232,6 +232,10 @@ int set_all_domain_attr(struct tls_domain **dom, char **str_vals, int *int_vals,
 		d->require_client_cert = int_vals[INT_VALS_REQUIRE_CERT_COL];
 	}
 
+	if (int_vals[INT_VALS_SEND_CA_COL] != -1) {
+		d->ca_client_send = int_vals[INT_VALS_SEND_CA_COL];
+	}
+
 	p = (char *) (d + 1);
 
 	d->name.s = p;
@@ -504,9 +508,11 @@ int tls_new_domain(str *name, int type, struct tls_domain **dom)
 	if (type == DOM_FLAG_SRV) {
 		d->verify_cert         = tls_verify_client_cert;
 		d->require_client_cert = tls_require_client_cert;
+		d->ca_client_send      = tls_ca_client_send;
 	} else {
 		d->verify_cert         = tls_verify_server_cert;
 		d->require_client_cert = 0;
+		d->ca_client_send      = 0;
 	}
 	d->method = TLS_METHOD_UNSPEC;
 

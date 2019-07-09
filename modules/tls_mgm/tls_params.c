@@ -393,3 +393,23 @@ int tlsp_set_eccurve(modparam_t type, void *in)
 	set_domain_attr(name, tls_ec_curve, val.s);
 	return 1;
 }
+
+int tlsp_set_ca_client_send(modparam_t type, void *in)
+{
+	str name;
+	str val;
+	unsigned int ca_send;
+
+	if (split_param_val((char*)in, &name, &val) < 0)
+		return -1;
+
+	if (str2int(&val, &ca_send)!=0) {
+		LM_ERR("option is not a number [%s]\n",val.s);
+		return -1;
+	}
+
+	set_domain_attr(name, ca_client_send, ca_send);
+
+	return 1;
+}
+

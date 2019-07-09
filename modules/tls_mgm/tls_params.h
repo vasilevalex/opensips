@@ -75,5 +75,7 @@ int tlsp_set_dhparams(modparam_t type, void *val);
 
 int tlsp_set_eccurve(modparam_t type, void *val);
 
+int tlsp_set_ca_client_send(modparam_t type, void *val);
+
 #endif
 

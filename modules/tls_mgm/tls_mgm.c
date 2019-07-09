@@ -144,6 +144,7 @@ static param_export_t params[] = {
 	{ "crl_dir",       STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_crldir     },
 	{ "ca_list",       STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_calist     },
 	{ "ca_dir",        STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_cadir      },
+	{ "ca_client_send",STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_ca_client_send },
 	{ "ciphers_list",  STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_cplist     },
 	{ "dh_params",     STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_dhparams   },
 	{ "ec_curve",      STR_PARAM|USE_FUNC_PARAM,  (void*)tlsp_set_eccurve    },
@@ -509,6 +510,7 @@ int load_info(struct tls_domain **serv_dom, struct tls_domain **cli_dom,
 	columns[14] = &cplist_col;
 	columns[15] = &dhparams_col;
 	columns[16] = &eccurve_col;
+	columns[17] = &ca_client_send_col;
 
 	/* checking if the table version is up to date*/
 	if (db_check_table_version(&dr_dbf, db_hdl, &tls_db_table, TLS_TABLE_VERSION) != 0)
@@ -608,6 +610,9 @@ int load_info(struct tls_domain **serv_dom, struct tls_domain **cli_dom,
 
 			check_val(eccurve_col, ROW_VALUES(row) + 16, DB_STRING, 0, 0);
 			str_vals[STR_VALS_ECCURVE_COL] = (char *) VAL_STRING(ROW_VALUES(row) + 16);
+
+			check_val(ca_client_send_col, ROW_VALUES(row) + 17, DB_INT, 0, 0);
+			int_vals[INT_VALS_SEND_CA_COL] = VAL_INT(ROW_VALUES(row) + 17);
 
 			if (db_add_domain(str_vals, int_vals, blob_vals, serv_dom, cli_dom,
 								script_srv_doms, script_cli_doms) < 0) {
@@ -1053,18 +1058,22 @@ static int load_crl(SSL_CTX * ctx, char *crl_directory, int crl_check_all)
  * The list is to be stored in a single file, containing all
  * the acceptable root certificates.
  */
-static int load_ca(SSL_CTX * ctx, char *filename)
+static int load_ca(SSL_CTX * ctx, char *filename, int ca_client)
 {
 	if (!SSL_CTX_load_verify_locations(ctx, filename, 0)) {
 		LM_ERR("unable to load ca '%s'\n", filename);
 		return -1;
 	}
 
+	if ( ca_client ) {
+		SSL_CTX_set_client_CA_list(ctx, SSL_load_client_CA_file(filename));
+	}
+
 	LM_DBG("CA '%s' successfully loaded\n", filename);
 	return 0;
 }
 
-static int load_ca_db(SSL_CTX * ctx, str *blob)
+static int load_ca_db(SSL_CTX * ctx, str *blob, int ca_client)
 {
 	X509_STORE *store;
 	X509 *cert = NULL;
@@ -1085,13 +1094,16 @@ static int load_ca_db(SSL_CTX * ctx, str *blob)
 	}
 
 	while ((cert = PEM_read_bio_X509_AUX(cbio, NULL, 0, NULL)) != NULL) {
-		tls_dump_cert_info("CA loaded: ", cert);
 		if (!X509_STORE_add_cert(store, cert)){
 			tls_dump_cert_info("Unable to add ca: ", cert);
 			X509_free(cert);
 			BIO_free(cbio);
 			return -1;
 		}
+		if ( !(ca_client && SSL_CTX_add_client_CA(ctx, cert)) ) {
+			tls_dump_cert_info("Unable to load ca for send to client: ", cert);	
+		}
+		tls_dump_cert_info("CA loaded: ", cert);
 		X509_free(cert);
 	}
 
@@ -1102,13 +1114,16 @@ static int load_ca_db(SSL_CTX * ctx, str *blob)
 
 /*
  * Load a caList from a directory instead of a single file.
+ * Load of CAs list to send to client doesn't supported here
  */
-static int load_ca_dir(SSL_CTX * ctx, char *directory)
+static int load_ca_dir(SSL_CTX * ctx, char *directory, int ca_client)
 {
 	if (!SSL_CTX_load_verify_locations(ctx, 0 , directory)) {
 		LM_ERR("unable to load ca directory '%s'\n", directory);
 		return -1;
 	}
+
+	LM_INFO("Impossible to set list of CAs to send to client from directory");
 
 	LM_DBG("CA '%s' successfully loaded from directory\n", directory);
 	return 0;
@@ -1307,10 +1322,10 @@ static int init_tls_dom(struct tls_domain *d)
 	}
 
 	if (!(d->flags & DOM_FLAG_DB) || from_file) {
-		if (d->ca.s && load_ca(d->ctx, d->ca.s) < 0)
+		if (d->ca.s && load_ca(d->ctx, d->ca.s, d->ca_client_send) < 0)
 			return -1;
 	} else {
-		if (load_ca_db(d->ctx, &d->ca) < 0)
+		if (load_ca_db(d->ctx, &d->ca, d->ca_client_send) < 0)
 			return -1;
 	}
 
@@ -1323,7 +1338,7 @@ static int init_tls_dom(struct tls_domain *d)
 		d->ca_directory = tls_ca_dir;
 	}
 
-	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0)
+	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory, d->ca_client_send) < 0)
 		return -1;
 
 	return 0;
