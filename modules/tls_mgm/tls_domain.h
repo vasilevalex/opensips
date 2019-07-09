@@ -64,6 +64,7 @@
 #define INT_VALS_VERIFY_CERT_COL    2
 #define INT_VALS_REQUIRE_CERT_COL   3
 #define INT_VALS_CRL_CHECK_COL      4
+#define INT_VALS_SEND_CA_COL        5
 
 #define NO_BLOB_VALS 4
 

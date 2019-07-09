@@ -49,6 +49,7 @@ int             tls_default_method = TLS_USE_SSLv23;
 int             tls_verify_client_cert  = 1;
 int             tls_verify_server_cert  = 1;
 int             tls_require_client_cert = 1;
+int		tls_ca_client_send	= 0;
 /* disable CRL validation for all the certificates from the chain */
 int crl_check_all = 0;
 /* default location of certificates */
@@ -78,6 +79,7 @@ str    crl_check_col = str_init("crl_check_all");
 str    crl_dir_col = str_init("crl_dir");
 str    calist_col = str_init("ca_list");
 str    cadir_col = str_init("ca_dir");
+str    ca_client_send_col = str_init("ca_client_send");
 str    cplist_col = str_init("cipher_list");
 str    dhparams_col = str_init("dh_params");
 str    eccurve_col = str_init("ec_curve");

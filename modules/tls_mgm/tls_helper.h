@@ -54,6 +54,7 @@ struct tls_domain {
 	void           *ctx; /* libssl's SSL_CTX  */
 	int             verify_cert;
 	int             require_client_cert;
+	int		ca_client_send;
 	int             crl_check_all;
 	str            cert;
 	str            pkey;
