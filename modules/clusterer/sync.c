@@ -18,6 +18,7 @@
  */
 
 #include "../../rw_locking.h"
+#include "../../ipc.h"
 
 #include "api.h"
 #include "node_info.h"
@@ -275,32 +276,36 @@ int cl_sync_chunk_iter(bin_packet_t *packet)
 	return 1;
 }
 
-int send_sync_repl(cluster_info_t *cluster, int node_id, str *cap_name)
+void send_sync_repl(int sender, void *param)
 {
 	bin_packet_t sync_end_pkt;
 	struct local_cap *cap;
 	int rc;
 	str bin_buffer;
+	struct reply_rpc_params *p = (struct reply_rpc_params *)param;
 
-	for (cap = cluster->capabilities; cap; cap = cap->next)
-		if (!str_strcmp(cap_name, &cap->reg.name))
-			break;
+	lock_start_read(cl_list_lock);
+
+	for (cap = p->cluster->capabilities; cap; cap = cap->next)
+		if (!str_strcmp(&p->cap_name, &cap->reg.name))
+			 break;
 	if (!cap) {
 		LM_ERR("Sync request for unknown capability: %.*s\n",
-			cap_name->len, cap_name->s);
-		return -1;
+			p->cap_name.len, p->cap_name.s);
+		lock_stop_read(cl_list_lock);
+		return;
 	}
 
-	cap->reg.event_cb(SYNC_REQ_RCV, node_id);
+	cap->reg.event_cb(SYNC_REQ_RCV, p->node_id);
 
 	if (sync_packet_snd) {
 		bin_get_buffer(sync_packet_snd, &bin_buffer);
 		*sync_last_chunk_sz = bin_buffer.len - sync_prev_buf_len;
 
 		/* send and free the lastly built packet */
-		msg_add_trailer(sync_packet_snd, cluster->cluster_id, node_id);
+		msg_add_trailer(sync_packet_snd, p->cluster->cluster_id, p->node_id);
 
-		if ((rc = clusterer_send_msg(sync_packet_snd, cluster->cluster_id, node_id))<0)
+		if ((rc = clusterer_send_msg(sync_packet_snd, p->cluster->cluster_id, p->node_id))<0)
 			LM_ERR("Failed to send sync packet, rc=%d\n", rc);
 
 		bin_free_packet(sync_packet_snd);
@@ -312,21 +317,50 @@ int send_sync_repl(cluster_info_t *cluster, int node_id, str *cap_name)
 	/* send indication that all sync packets were sent */
 	if (bin_init(&sync_end_pkt,&cl_extra_cap,CLUSTERER_SYNC_END,BIN_SYNC_VERSION,0)<0) {
 		LM_ERR("Failed to init bin packet\n");
-		return -1;
+		lock_stop_read(cl_list_lock);
+		return;
 	}
-	bin_push_str(&sync_end_pkt, cap_name);
-	msg_add_trailer(&sync_end_pkt, cluster->cluster_id, node_id);
+	bin_push_str(&sync_end_pkt, &p->cap_name);
+	msg_add_trailer(&sync_end_pkt, p->cluster->cluster_id, p->node_id);
 
-	if (clusterer_send_msg(&sync_end_pkt, cluster->cluster_id, node_id) < 0) {
+	if (clusterer_send_msg(&sync_end_pkt, p->cluster->cluster_id, p->node_id) < 0) {
 		LM_ERR("Failed to send sync end message\n");
 		bin_free_packet(&sync_end_pkt);
-		return -1;
+		lock_stop_read(cl_list_lock);
+		return;
 	}
+
+	lock_stop_read(cl_list_lock);
 
 	bin_free_packet(&sync_end_pkt);
 
-	LM_INFO("Sent all sync packets for capability '%.*s' to node %d, cluster "
-	        "%d\n", cap_name->len, cap_name->s, node_id, cluster->cluster_id);
+	LM_DBG("Sent all sync packets for capability '%.*s' to node %d, cluster "
+		"%d\n", p->cap_name.len, p->cap_name.s, p->node_id, p->cluster->cluster_id);
+
+	shm_free(param);
+}
+
+int ipc_dispatch_sync_reply(cluster_info_t *cluster, int node_id, str *cap_name)
+{
+	struct reply_rpc_params *params;
+
+	params = shm_malloc(sizeof *params + cap_name->len);
+	if (!params) {
+		LM_ERR("oom!\n");
+		return -1;
+	}
+	memset(params, 0, sizeof *params);
+	params->cap_name.s = (char *)(params + 1);
+
+	memcpy(params->cap_name.s, cap_name->s, cap_name->len);
+	params->cap_name.len = cap_name->len;
+	params->node_id = node_id;
+	params->cluster = cluster;
+
+	if (ipc_dispatch_rpc(send_sync_repl, params) < 0) {
+		LM_ERR("Failed to dispatch rpc\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -339,12 +373,13 @@ void handle_sync_request(bin_packet_t *packet, cluster_info_t *cluster,
 
 	bin_pop_str(packet, &cap_name);
 
-	LM_INFO("Received sync request for capability '%.*s' from node %d, "
+	LM_DBG("Received sync request for capability '%.*s' from node %d, "
 	        "cluster %d\n", cap_name.len, cap_name.s, source->node_id,
 	        cluster->cluster_id);
 
 	if (get_next_hop(source)) {
-		send_sync_repl(cluster, source->node_id, &cap_name);
+		if (ipc_dispatch_sync_reply(cluster, source->node_id, &cap_name) < 0)
+			LM_ERR("Failed to dispatch sync reply job\n");
 	} else {
 		lock_get(source->lock);
 
@@ -403,7 +438,8 @@ void handle_sync_packet(bin_packet_t *packet, int packet_type,
 		set_bin_pkg_version(packet, (short)data_version);
 
 		next_data_chunk = NULL;
-		cap->reg.packet_cb(packet);
+		if (ipc_dispatch_mod_packet(packet, &cap->reg) < 0)
+			LM_ERR("Failed to dispatch handling of module packet\n");
 	} else { /* CLUSTERER_SYNC_END */
 		LM_INFO("Received all sync packets for capability '%.*s' in "
 		        "cluster %d\n", cap_name.len, cap_name.s, cluster->cluster_id);

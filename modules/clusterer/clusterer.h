@@ -106,6 +106,13 @@ struct remote_cap {
 	struct remote_cap *next;
 };
 
+struct packet_rpc_params {
+	struct capability_reg *cap;
+	int pkt_src_id;
+	int pkt_type;
+	str pkt_buf;
+};
+
 struct node_info;
 struct cluster_info;
 
@@ -168,5 +175,7 @@ struct local_cap *dup_caps(struct local_cap *caps);
 int preserve_reg_caps(struct cluster_info *new_info);
 
 struct mi_root *run_rcv_mi_cmd(str *cmd_name, str *cmd_params, int nr_params);
+
+int ipc_dispatch_mod_packet(bin_packet_t *packet, struct capability_reg *cap);
 
 #endif  /* CLUSTERER_H */
